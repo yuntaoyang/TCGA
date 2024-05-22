@@ -5,10 +5,13 @@
 library(TCGAbiolinks)
 library(SummarizedExperiment)
 library(biomaRt)
+library(dplyr)
 #---- Set up parameters --------------------------------------------------------
 project <- 'TCGA-BLCA'
 dir_data <- './data'
-dir.create(dir_data)
+if (!dir.exists(dir_data)) {
+  dir.create(dir_data)
+}
 #---- Project summary ----------------------------------------------------------
 tryCatch({
   getProjectSummary(project)
@@ -22,10 +25,12 @@ Expr_counts <- GDCquery(project = project,
                         data.type = 'Gene Expression Quantification',
                         workflow.type = "STAR - Counts" ) 
 GDCdownload(Expr_counts, method = "api")
-df_counts <- assay(GDCprepare(query = Expr_counts))
-# Convert gene ids to gene names
+# Prepare data and convert to data frame
+df_counts <- as.data.frame(assay(GDCprepare(query = Expr_counts)))
+df_counts$gene_id <- row.names(df_counts)
+# Convert gene ids to gene names using biomaRt
 ensembl <- useMart("ensembl", dataset = "hsapiens_gene_ensembl")
-ensg_ids <- gsub("\\..*", "", rownames(df_counts))
+ensg_ids <- gsub("\\..*", "", df_counts$gene_id)
 gene_mapping <- getBM(
   filters = "ensembl_gene_id",
   attributes = c("ensembl_gene_id", "hgnc_symbol"),
@@ -33,9 +38,12 @@ gene_mapping <- getBM(
   mart = ensembl
 )
 gene_mapping <- gene_mapping[match(ensg_ids, gene_mapping$ensembl_gene_id), ]
-rownames(df_counts) <- gene_mapping$hgnc_symbol
+df_counts$gene_name <- gene_mapping$hgnc_symbol
+df_counts <- df_counts %>%
+  select(tail(names(.), 2), everything())
 # Save the count matrix
-write.csv(df_counts, file.path(dir_data, paste0(project, '_counts.csv')))
+write.csv(df_counts, file.path(dir_data, paste0(project, '_counts.csv')), 
+          row.names = FALSE)
 #---- Clinical data ------------------------------------------------------------
 # Download the clinical data
 df_clinical <- GDCquery_clinic(project = project, type = "clinical")
